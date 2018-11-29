@@ -26,6 +26,9 @@
 
 ;;; Code:
 
+(when (require 'undercover nil t)
+  (undercover "*.el" (:send-report nil)))
+
 (require 'zmq)
 (require 'jupyter-client)
 (require 'jupyter-repl)
