@@ -214,25 +214,36 @@ of one. The first kernel that is returned by
 parameter will be used."
   (let* ((kernel (alist-get :kernel params))
          (key (org-babel-jupyter-session-key params))
-         (client
-          (or (gethash key org-babel-jupyter-session-clients)
-              (let ((client
-                     (if (string-suffix-p ".json" session)
-                         (jupyter-connect-repl session nil nil 'jupyter-org-client)
-                       (jupyter-run-repl kernel nil nil 'jupyter-org-client))))
-                (jupyter-set client 'jupyter-include-other-output nil)
-                (jupyter-with-repl-buffer client
-                  (let ((name (buffer-name)))
-                    (when (string-match "^\\*\\(.+\\)\\*" name)
-                      (rename-buffer
-                       (concat "*" (match-string 1 name) "-" session "*")
-                       'unique)))
-                  (add-hook
-                   'kill-buffer-hook
-                   (lambda ()
-                     (remhash key org-babel-jupyter-session-clients))
-                   nil t))
-                (puthash key client org-babel-jupyter-session-clients)))))
+         (client (gethash key org-babel-jupyter-session-clients)))
+    (unless client
+      (setq client
+            (cond
+             ((string-suffix-p ".json" session)
+              (jupyter-connect-repl session nil nil 'jupyter-org-client))
+             ((file-remote-p session)
+              (let* ((remote (file-remote-p session))
+                     (localname (file-remote-p session 'localname))
+                     (default-directory remote)
+                     (jupyter-runtime-directory
+                      (concat remote (jupyter-command "--runtime-dir"))))
+                (when (zerop (length localname))
+                  (error "No remote session name"))
+                (jupyter-run-repl kernel nil nil 'jupyter-org-client)))
+             (t
+              (jupyter-run-repl kernel nil nil 'jupyter-org-client))))
+      (jupyter-set client 'jupyter-include-other-output nil)
+      (jupyter-with-repl-buffer client
+        (let ((name (buffer-name)))
+          (when (string-match "^\\*\\(.+\\)\\*" name)
+            (rename-buffer
+             (concat "*" (match-string 1 name) "-" session "*")
+             'unique)))
+        (add-hook
+         'kill-buffer-hook
+         (lambda ()
+           (remhash key org-babel-jupyter-session-clients))
+         nil t))
+      (puthash key client org-babel-jupyter-session-clients))
     (oref client buffer)))
 
 (defun org-babel-jupyter-initiate-session (&optional session params)

@@ -120,6 +120,11 @@ connect to MANAGER's kernel."
       ;; kcomm broadcasts event to all connected clients. This is more
       ;; efficient as it only uses one subprocess for every client connected to
       ;; a kernel.
+      ;;
+      ;; This would also be better for remote kernels that have tunnels since
+      ;; making multiple clients to a remote kernel would try to create
+      ;; multiple tunnels I don't know how ssh handles that case, does it
+      ;; actually try to make tunnels that are already open?
       (oset client kcomm (jupyter-channel-ioloop-comm))
       (jupyter-initialize-connection
        client (copy-sequence (oref manager session))))))
@@ -154,7 +159,7 @@ of ARGS are the arguments of the command."
            for (k v) on env by #'cddr
            collect (format "%s=%s" (cl-subseq (symbol-name k) 1) v))
           process-environment)))
-    (apply #'start-process
+    (apply #'start-file-process
            (format "jupyter-kernel-%s" kernel-name)
            (generate-new-buffer
             (format " *jupyter-kernel[%s]*" kernel-name))
@@ -208,9 +213,9 @@ kernel. Starting a kernel involves the following steps:
                      (cl-loop
                       for arg in (append (plist-get spec :argv) nil)
                       if (equal arg "{connection_file}")
-                      collect conn-file
+                      collect (file-local-name conn-file)
                       else if (equal arg "{resource_dir}")
-                      collect resource-dir
+                      collect (file-local-name resource-dir)
                       else collect arg))))
           (oset manager kernel proc)
           (oset manager conn-file conn-file)
@@ -372,18 +377,39 @@ see `jupyter-make-client'."
       ;;
       ;; NOTE: Startup messages have no parent header, hence the need for
       ;; `jupyter-include-other-output'.
+      ;;
+      ;; TODO: Remove this since startup messages are now handled regardless.
       (let* ((jupyter-include-other-output t)
              (cb (lambda (_ msg)
                    (setq started
                          (jupyter-message-status-starting-p msg)))))
         (jupyter-add-hook client 'jupyter-iopub-message-hook cb)
-        (jupyter-start-channels client)
-        (jupyter-start-kernel manager)
-        (jupyter-start-channels manager)
-        (jupyter-with-timeout
-            ("Kernel starting up..." jupyter-long-timeout
-             (message "Kernel did not send startup message"))
-          started)
+        (if (file-remote-p default-directory)
+            (progn
+              (jupyter-start-kernel manager)
+              ;; Re-initialize the client after starting the kernel in order to
+              ;; tunnel the sockets.
+              ;;
+              ;; TODO: Avoid having to do this re-initialization. The problem
+              ;; is that we tunnel the connection when given a remote file name
+              ;; and the connection file is written in `jupyter-start-kernel'
+              ;; so we only have access the connection info before starting the
+              ;; kernel. We can't just call `jupyter-tunnel-connection' before
+              ;; starting the kernel and use the connection info from that
+              ;; since we would need the old ports when actually starting the
+              ;; kernel. So maybe the strategy would be to add a new slot to
+              ;; the manager containing the connection info that clients should
+              ;; use.
+              (jupyter-initialize-connection client (oref manager conn-file))
+              (jupyter-start-channels client)
+              (jupyter-start-channels manager))
+          (jupyter-start-channels client)
+          (jupyter-start-kernel manager)
+          (jupyter-start-channels manager)
+          (jupyter-with-timeout
+              ("Kernel starting up..." jupyter-long-timeout
+               (message "Kernel did not send startup message"))
+            started))
         ;; Un-pause the hearbeat after the kernel starts since waiting for
         ;; it to start may cause the heartbeat to think the kernel died.
         (jupyter-hb-unpause client)
