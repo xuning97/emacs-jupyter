@@ -544,24 +544,34 @@ following fields:
 
 (eval-when-compile (require 'tramp))
 
-(defun jupyter-tunnel-connection (conn-file &optional server)
-  "Forward local ports to the remote ports in CONN-FILE.
-CONN-FILE is the path to a Jupyter connection file, SERVER is the
-host that the kernel connection in CONN-FILE is located. Return a
-copy of the connection plist in CONN-FILE, but with the ports
-replaced by the local ports used for the forwarding.
+(defun jupyter-tunnel-connection (conn-file-or-info &optional server)
+  "Forward local ports to the remote ports in CONN-FILE-OR-INFO.
+CONN-FILE-OR-INFO is the path to a Jupyter connection file,
+SERVER is the host that the kernel connection in CONN-FILE-OR-INFO is
+located. Return a copy of the connection plist in CONN-FILE-OR-INFO, but
+with the ports replaced by the local ports used for the
+forwarding.
 
-If CONN-FILE is a `tramp' file name, the SERVER argument will be
+If CONN-FILE-OR-INFO is a `tramp' file name, the SERVER argument will be
 ignored and the host will be extracted from the information
 contained in the file name.
 
+In addition, CONN-FILE-OR-INFO can be a connection info property
+list. In this case, the remote connection information is obtained
+from `default-directory'. If `default-directory' is not a remote
+file name, return the property list unchanged.
+
 Note that `zmq-make-tunnel' is used to create the tunnels."
   (catch 'no-tunnels
-    (let ((conn-info (jupyter-read-plist conn-file)))
-      (when (and (file-remote-p conn-file)
-                 (functionp 'tramp-dissect-file-name))
+    (let* ((conn-file (if (consp conn-file-or-info) default-directory
+                        conn-file-or-info))
+           (conn-info (if (consp conn-file-or-info) conn-file-or-info
+                        (jupyter-read-plist conn-file-or-info))))
+      (unless (file-remote-p conn-file)
+        (throw 'no-tunnels conn-info))
+      (when (functionp 'tramp-dissect-file-name)
         (pcase-let (((cl-struct tramp-file-name method user host)
-                     (tramp-dissect-file-name conn-file)))
+                     (tramp-dissect-file-name conn-file-or-info)))
           (pcase method
             ("docker"
              ;; Assume docker is using the -p argument to publish its exposed
@@ -588,6 +598,7 @@ Note that `zmq-make-tunnel' is used to create the tunnels."
           (zmq-socket-set sock zmq-LINGER 0)
           (zmq-close sock))))))
 
+;; TODO: How to bind to a random port on a remote computer.
 (cl-defun jupyter-create-connection-info (&key
                                           (kernel-name "python")
                                           (transport "tcp")
