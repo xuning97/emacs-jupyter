@@ -339,9 +339,7 @@ sending closures to the IOLOOP. An example:
   (cl-assert (functionp cb))
   (with-slots (process callbacks) ioloop
     (oset ioloop callbacks (append callbacks (list cb)))
-    (when (process-live-p process)
-      (zmq-subprocess-send process
-        (list 'callback (macroexpand-all cb))))))
+    (jupyter-send ioloop 'callback (macroexpand-all cb))))
 
 (defun jupyter-ioloop-poller-add (socket events)
   "Add SOCKET to be polled using the `jupyter-ioloop-poller'.
